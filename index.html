@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧零售商品檢視系統 (唯讀版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <style>
+        :root {
+            --primary: #007bff;
+            --bg-color: #f4f6f9; 
+            --card-bg: #ffffff;
+        }
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; padding: 0; background-color: var(--bg-color); padding-bottom: 20px; }
+        
+        /* Sticky Header */
+        header {
+            position: sticky; top: 0; z-index: 1000; background: #fff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 15px; margin-bottom: 15px;
+        }
+        .header-title { font-size: 1.2em; font-weight: bold; color: var(--primary); margin-bottom: 5px; }
+        .header-stats { font-size: 0.85em; color: #666; }
+        
+        /* Layout & Cards */
+        .container { padding: 0 10px; max-width: 100%; margin: 0 auto; }
+        
+        .card { 
+            background: var(--card-bg); border-radius: 8px; padding: 12px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex;
+            flex-direction: column; justify-content: space-between; min-width: 0;
+        }
+        .card-title { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; word-break: break-all; }
+        .card-sub { font-size: 0.9em; color: #555; margin-bottom: 8px; }
+        
+        /* Inputs */
+        input, select { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        .flex-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 5px;}
+        .flex-row > * { flex: 1; }
+        
+        svg.barcode { width: 100% !important; height: auto !important; max-height: 70px; }
+
+        /* 網格佈局 */
+        #searchResult {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            padding: 5px 0;
+            width: 100%;
+            align-items: stretch;
+        }
+
+        @media (max-width: 350px) {
+            #searchResult { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-title">智慧零售商品檢視系統</div>
+    <div class="header-stats" id="headerStats">狀態：準備載入資料...</div>
+</header>
+
+<div class="container">
+    <div id="searchFilters">
+        <div class="flex-row">
+            <select id="searchC1" onchange="renderSearch()"><option value="">C1: 全部搜尋</option></select>
+            <select id="searchEvent" onchange="renderSearch()"><option value="">Event: 全部搜尋</option></select>
+        </div>
+        <div class="flex-row">
+            <input type="text" id="searchKeyword1" placeholder="關鍵字 1 (ID/Name)" oninput="renderSearch()">
+            <input type="text" id="searchKeyword2" placeholder="關鍵字 2 (ID/Name)" oninput="renderSearch()">
+        </div>
+    </div>
+    <div class="header-stats" id="searchCount" style="margin-bottom: 10px;">請稍候，正在同步雲端資料庫...</div>
+    <div id="searchResult"></div>
+</div>
+
+<script>
+    // ⚠️ 請將這裡替換成你 GitHub 上 CSV 檔案的 Raw 網址
+    const GITHUB_CSV_URL = 'https://raw.githubusercontent.com/bk-bc/Borcodeonly/refs/heads/main/20260321.csv';
+    
+    let db = []; 
+
+    // --- 網頁載入時自動去 GitHub 抓資料 ---
+    window.onload = async () => {
+        document.getElementById('headerStats').innerText = "狀態：連線至雲端抓取資料中...";
+        await fetchCSV();
+    };
+
+    async function fetchCSV() {
+        try {
+            // 加入快取控制，確保每次抓到的都是最新版
+            const response = await fetch(GITHUB_CSV_URL, { cache: "no-store" });
+            if (!response.ok) throw new Error('網路回應錯誤，請確認網址是否正確。');
+            
+            const csvText = await response.text();
+            parseData(csvText);
+            
+            document.getElementById('headerStats').innerText = `狀態：資料同步完成 | 總筆數 ${db.length}`;
+            populateSearchDropdowns();
+            renderSearch();
+            
+        } catch (error) {
+            console.error(error);
+            document.getElementById('headerStats').innerText = "狀態：載入失敗，請檢查網路連線或 CSV 網址。";
+            document.getElementById('searchCount').innerText = "";
+        }
+    }
+
+    // --- 解析 CSV 資料 ---
+    function parseData(text) {
+        db = [];
+        const lines = text.split('\n');
+        
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            const parts = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+            if (parts.length < 7) continue;
+            
+            let [Type, ID, Name, C1, Expiry, Event, Locked] = parts;
+            
+            // 由於這是純檢視版，我們信任雲端 CSV 已經是被管理員清洗過的乾淨資料
+            db.push({
+                Type: Type.toUpperCase(),
+                ID,
+                Name,
+                C1: C1 || '未分類',
+                Event: cleanArrayStr(Event, Name, ID)
+            });
+        }
+    }
+
+    // --- 工具函式 ---
+    function cleanArrayStr(str, itemName = '', itemID = '') {
+        if (!str) return '';
+        let arr = str.split('/').map(s => s.trim()).filter(Boolean);
+        const exactMatchRegex = new RegExp(`^(${escapeRegExp(itemName)}|${escapeRegExp(itemID)})$`, 'i');
+        arr = arr.filter(e => !exactMatchRegex.test(e));
+        return [...new Set(arr)].join('/');
+    }
+
+    function escapeRegExp(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function renderBarcode(targetId, value, format) {
+        try {
+            JsBarcode(`#${targetId}`, value, {
+                format: format.includes('EAN') || format.includes('UPC') ? format : 'CODE128',
+                displayValue: true, height: 40, margin: 0, width: 2
+            });
+        } catch (e) {
+            console.error("Barcode error:", e);
+        }
+    }
+
+    // --- 下拉選單處理 (包含排序) ---
+    function populateSearchDropdowns() {
+        const c1Set = new Set(), eventSet = new Set();
+        db.forEach(item => {
+            if(item.C1) c1Set.add(item.C1);
+            if(item.Event) item.Event.split('/').forEach(e => { if(e) eventSet.add(e); });
+        });
+        
+        let c1Html = `<option value="">C1: 全部搜尋</option>`;
+        [...c1Set].sort((a, b) => a.localeCompare(b, 'zh-TW')).forEach(c => c1Html += `<option value="${c}">${c}</option>`);
+        document.getElementById('searchC1').innerHTML = c1Html;
+
+        let evHtml = `<option value="">Event: 全部搜尋</option>`;
+        [...eventSet].sort((a, b) => a.localeCompare(b, 'zh-TW')).forEach(e => evHtml += `<option value="${e}">${e}</option>`);
+        document.getElementById('searchEvent').innerHTML = evHtml;
+    }
+
+    // --- 搜尋與畫面渲染 ---
+    function renderSearch() {
+        const c1 = document.getElementById('searchC1').value;
+        const ev = document.getElementById('searchEvent').value;
+        const kw1 = document.getElementById('searchKeyword1').value.trim().toLowerCase();
+        const kw2 = document.getElementById('searchKeyword2').value.trim().toLowerCase();
+        const resDiv = document.getElementById('searchResult');
+        
+        resDiv.innerHTML = '';
+
+        if (kw1.length < 1 && kw2.length < 1 && !c1 && !ev) {
+            document.getElementById('searchCount').innerText = '輸入關鍵字或選擇篩選項目開始搜尋...';
+            return;
+        }
+
+        let filtered = db.filter(item => {
+            if (c1 && item.C1 !== c1) return false;
+            if (ev && !item.Event.split('/').includes(ev)) return false;
+            let textMatch = (kw1 === '' || item.ID.toLowerCase().includes(kw1) || item.Name.toLowerCase().includes(kw1)) &&
+                            (kw2 === '' || item.ID.toLowerCase().includes(kw2) || item.Name.toLowerCase().includes(kw2));
+            return textMatch;
+        });
+
+        document.getElementById('searchCount').innerText = `搜尋結果: 找到 ${filtered.length} 筆 (顯示上限50筆)`;
+        filtered = filtered.slice(0, 50);
+
+        filtered.forEach((item, idx) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div>
+                    <div class="card-title">${item.Name}</div>
+                    <div class="card-sub">${item.C1} | ${item.Event || '無活動'}</div>
+                </div>
+                <div style="text-align:center; margin-top: 10px;">
+                    <svg id="bc_${idx}" class="barcode"></svg>
+                </div>
+            `;
+            resDiv.appendChild(card);
+            renderBarcode(`bc_${idx}`, item.ID, item.Type);
+        });
+    }
+</script>
+</body>
+</html>
