@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PDF 商品提取 v2</title>
+    <title>PDF 商品提取 v3 (Claude Vision)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <style>
         :root {
@@ -16,36 +16,51 @@
             --red: #f74f6a;
             --text: #e8eaf0;
             --muted: #6b7280;
+            --purple: #a78bfa;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'SF Pro Display', -apple-system, sans-serif;
+            font-family: -apple-system, 'PingFang TC', sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 24px 16px;
+            padding: 20px 16px 40px;
         }
-        h1 {
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            margin-bottom: 4px;
+        h1 { font-size: 18px; font-weight: 700; margin-bottom: 3px; }
+        .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+        .badge {
+            display: inline-block;
+            background: rgba(167,139,250,0.15);
+            color: var(--purple);
+            border: 1px solid rgba(167,139,250,0.3);
+            border-radius: 20px;
+            font-size: 11px;
+            padding: 2px 8px;
+            margin-left: 6px;
+            vertical-align: middle;
         }
-        .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 
         .card {
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+        .card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
         }
 
-        /* File drop zone */
+        /* Drop zone */
         .drop-zone {
             border: 2px dashed var(--border);
             border-radius: 10px;
-            padding: 28px;
+            padding: 24px 16px;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
@@ -53,200 +68,208 @@
         }
         .drop-zone:hover, .drop-zone.drag-over {
             border-color: var(--accent);
-            background: rgba(79,142,247,0.05);
+            background: rgba(79,142,247,0.04);
         }
         .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-        .drop-icon { font-size: 32px; margin-bottom: 8px; }
-        .drop-label { font-size: 14px; color: var(--muted); }
-        .drop-label span { color: var(--accent); }
+        .drop-zone .di { font-size: 28px; margin-bottom: 6px; }
+        .drop-zone .dl { font-size: 13px; color: var(--muted); }
+        .drop-zone .dl span { color: var(--accent); }
 
-        /* Page selector */
+        /* Note box */
+        .note {
+            background: rgba(167,139,250,0.08);
+            border: 1px solid rgba(167,139,250,0.2);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: #c4b5fd;
+            line-height: 1.6;
+            margin-top: 10px;
+        }
+        .note strong { color: var(--purple); }
+
+        /* Page grid */
+        .sel-row {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 10px; flex-wrap: wrap;
+        }
+        .sel-info { font-size: 12px; color: var(--muted); flex: 1; }
+        .sel-info span { color: var(--accent); font-weight: 700; }
+        .mini-btn {
+            background: none; border: 1px solid var(--border);
+            color: var(--muted); border-radius: 6px;
+            padding: 3px 9px; cursor: pointer; font-size: 11px;
+            transition: 0.15s;
+        }
+        .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+
         .page-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-            gap: 8px;
-            max-height: 280px;
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 6px;
+            max-height: 260px;
             overflow-y: auto;
-            padding: 4px;
         }
         .page-thumb {
             border: 2px solid var(--border);
-            border-radius: 8px;
+            border-radius: 7px;
             overflow: hidden;
             cursor: pointer;
             position: relative;
             transition: border-color 0.15s;
+            background: #13151f;
         }
         .page-thumb.selected { border-color: var(--accent); }
         .page-thumb canvas { display: block; width: 100%; }
         .page-thumb .pg-label {
             position: absolute; bottom: 0; left: 0; right: 0;
-            background: rgba(0,0,0,0.65);
-            font-size: 10px; text-align: center; padding: 2px 0;
-            color: #fff;
+            background: rgba(0,0,0,0.7);
+            font-size: 10px; text-align: center; padding: 2px 0; color: #fff;
         }
-        .page-thumb .check {
-            position: absolute; top: 4px; right: 4px;
-            width: 18px; height: 18px;
+        .page-thumb .ck {
+            position: absolute; top: 3px; right: 3px;
+            width: 16px; height: 16px;
             background: var(--accent);
             border-radius: 50%;
             display: none; align-items: center; justify-content: center;
-            font-size: 11px;
+            font-size: 10px;
         }
-        .page-thumb.selected .check { display: flex; }
-
-        /* Select all row */
-        .sel-row {
-            display: flex; align-items: center; gap: 10px;
-            margin-bottom: 10px; font-size: 13px;
-        }
-        .sel-row button {
-            background: none; border: 1px solid var(--border);
-            color: var(--muted); border-radius: 6px;
-            padding: 4px 10px; cursor: pointer; font-size: 12px;
-            transition: 0.15s;
-        }
-        .sel-row button:hover { border-color: var(--accent); color: var(--accent); }
+        .page-thumb.selected .ck { display: flex; }
 
         /* Scan button */
         .scan-btn {
-            display: flex; align-items: center; justify-content: center; gap-8px;
-            width: 100%; padding: 12px;
-            background: var(--accent);
+            width: 100%; padding: 11px;
+            background: linear-gradient(135deg, #6366f1, #4f8ef7);
             border: none; border-radius: 10px;
-            color: #fff; font-size: 15px; font-weight: 600;
+            color: #fff; font-size: 14px; font-weight: 600;
             cursor: pointer; transition: 0.2s;
             margin-top: 12px;
         }
-        .scan-btn:hover { background: #3d7de8; }
+        .scan-btn:hover { opacity: 0.9; }
         .scan-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
 
         /* Progress */
-        .progress-wrap { margin-top: 10px; display: none; }
-        .progress-bar {
-            height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+        .progress-wrap { margin-top: 10px; }
+        .progress-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #4f8ef7); width: 0%; transition: width 0.4s; }
+        .progress-label { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+        /* Spinner */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .spinner {
+            display: inline-block; width: 12px; height: 12px;
+            border: 2px solid var(--border); border-top-color: var(--accent);
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            margin-right: 6px; vertical-align: middle;
         }
-        .progress-fill {
-            height: 100%; background: var(--accent);
-            width: 0%; transition: width 0.3s;
-        }
-        .progress-label { font-size: 12px; color: var(--muted); margin-top: 6px; }
+        .scanning-msg { animation: pulse 1.5s ease infinite; }
 
         /* Results */
         .result-header {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 12px;
+            display: flex; align-items: center;
+            justify-content: space-between; margin-bottom: 10px;
         }
-        .result-count {
-            font-size: 13px; color: var(--muted);
-        }
+        .result-count { font-size: 13px; color: var(--muted); }
         .result-count span { color: var(--green); font-weight: 700; }
-
         .export-btn {
-            background: var(--green); border: none; border-radius: 8px;
-            color: #0f1117; font-size: 12px; font-weight: 700;
-            padding: 6px 14px; cursor: pointer; transition: 0.2s;
+            background: var(--green); border: none; border-radius: 7px;
+            color: #0f1117; font-size: 11px; font-weight: 700;
+            padding: 5px 12px; cursor: pointer; transition: 0.2s;
         }
         .export-btn:hover { background: #35b87d; }
         .export-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
 
-        /* Table */
         .result-table-wrap {
-            max-height: 420px;
-            overflow-y: auto;
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            max-height: 400px; overflow-y: auto;
+            border: 1px solid var(--border); border-radius: 8px;
         }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th {
-            background: #13151f;
-            padding: 8px 12px;
-            text-align: left;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            background: #13151f; padding: 7px 10px;
+            text-align: left; font-size: 10px; font-weight: 600;
+            color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
             position: sticky; top: 0; z-index: 1;
         }
-        td {
-            padding: 8px 12px;
-            border-top: 1px solid var(--border);
-        }
+        td { padding: 7px 10px; border-top: 1px solid var(--border); }
         tr:hover td { background: rgba(255,255,255,0.02); }
-        .code-cell { font-family: 'SF Mono', monospace; color: var(--yellow); font-size: 12px; white-space: nowrap; }
-        .name-cell { color: var(--text); }
-        .page-cell { color: var(--muted); font-size: 11px; }
-        .price-cell { color: var(--green); font-size: 12px; white-space: nowrap; }
+        .code-cell { font-family: monospace; color: var(--yellow); white-space: nowrap; }
+        .price-cell { color: var(--green); white-space: nowrap; }
+        .page-cell { color: var(--muted); font-size: 10px; }
+        .promo-cell { color: #a0aec0; font-size: 11px; }
 
-        /* Empty state */
-        .empty-state {
-            text-align: center; padding: 40px 16px;
-            color: var(--muted); font-size: 13px;
-        }
-        .empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+        .empty-state { text-align: center; padding: 32px 16px; color: var(--muted); font-size: 12px; }
+        .empty-state .ei { font-size: 32px; margin-bottom: 8px; }
 
         /* Log */
-        details { margin-top: 12px; }
-        summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+        details { margin-top: 10px; }
+        summary { font-size: 11px; color: var(--muted); cursor: pointer; }
         .log-box {
-            background: #0a0b10; border-radius: 8px; padding: 12px;
-            font-family: monospace; font-size: 11px; color: #5cdb95;
-            max-height: 200px; overflow-y: auto;
-            margin-top: 8px; white-space: pre-wrap;
-            line-height: 1.6;
+            background: #0a0b10; border-radius: 8px; padding: 10px;
+            font-family: monospace; font-size: 10px; color: #5cdb95;
+            max-height: 180px; overflow-y: auto; margin-top: 6px;
+            white-space: pre-wrap; line-height: 1.7;
         }
 
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     </style>
 </head>
 <body>
 
-<h1>📦 PDF 商品提取 v2</h1>
-<p class="subtitle">精準提取品號 + 品名，支援CSV匯出</p>
+<h1>📦 PDF 商品提取 <span class="badge">Claude Vision</span></h1>
+<p class="subtitle">圖片型PDF專用 · AI精準辨識品號品名</p>
 
+<!-- Step 1: Upload -->
 <div class="card">
+    <div class="card-title">① 上傳 PDF</div>
     <div class="drop-zone" id="drop-zone">
         <input type="file" id="file-input" accept="application/pdf">
-        <div class="drop-icon">📄</div>
-        <div class="drop-label">點擊或拖曳 <span>PDF 檔案</span> 到此處</div>
+        <div class="di">📄</div>
+        <div class="dl">點擊或拖曳 <span>PDF 檔案</span></div>
+    </div>
+    <div class="note">
+        <strong>⚠️ 注意：</strong>此 PDF 每頁都是圖片（非向量文字），
+        使用 <strong>Claude Vision API</strong> 辨識，準確率遠高於 Tesseract OCR。
+        每頁約耗時 3-8 秒。
     </div>
 </div>
 
+<!-- Step 2: Page select -->
 <div class="card" id="page-section" style="display:none">
+    <div class="card-title">② 選擇要掃描的頁面</div>
     <div class="sel-row">
-        <span id="sel-count" style="color:var(--muted); font-size:13px;">0 頁已選</span>
-        <button id="btn-all">全選</button>
-        <button id="btn-none">清除</button>
+        <span class="sel-info">已選 <span id="sel-count">0</span> 頁</span>
+        <button class="mini-btn" id="btn-all">全選</button>
+        <button class="mini-btn" id="btn-none">清除</button>
     </div>
     <div class="page-grid" id="page-grid"></div>
-    <button class="scan-btn" id="btn-scan" disabled>⚡ 開始掃描</button>
-    <div class="progress-wrap" id="progress-wrap">
+    <button class="scan-btn" id="btn-scan" disabled>🤖 開始 AI 掃描</button>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-        <div class="progress-label" id="progress-label">處理中...</div>
+        <div class="progress-label" id="progress-label">準備中...</div>
     </div>
 </div>
 
+<!-- Step 3: Results -->
 <div class="card" id="result-section" style="display:none">
     <div class="result-header">
         <div class="result-count">找到 <span id="result-count">0</span> 筆商品</div>
-        <button class="export-btn" id="btn-export" disabled>⬇ 匯出 CSV</button>
+        <button class="export-btn" id="btn-export" disabled>⬇ CSV</button>
     </div>
     <div class="result-table-wrap">
-        <table id="result-table">
+        <table>
             <thead>
                 <tr>
                     <th>品號</th>
                     <th>品名</th>
-                    <th>售價</th>
+                    <th>原價</th>
+                    <th>活動</th>
                     <th>頁</th>
                 </tr>
             </thead>
             <tbody id="result-body">
-                <tr><td colspan="4"><div class="empty-state"><div class="icon">🔍</div>尚無資料</div></td></tr>
+                <tr><td colspan="5"><div class="empty-state"><div class="ei">🔍</div>尚無資料</div></td></tr>
             </tbody>
         </table>
     </div>
@@ -263,270 +286,221 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 let currentPdf = null;
 let allResults = [];
 
-const fileInput = document.getElementById('file-input');
-const dropZone = document.getElementById('drop-zone');
-const pageSection = document.getElementById('page-section');
-const pageGrid = document.getElementById('page-grid');
-const selCount = document.getElementById('sel-count');
-const btnScan = document.getElementById('btn-scan');
-const progressWrap = document.getElementById('progress-wrap');
-const progressFill = document.getElementById('progress-fill');
-const progressLabel = document.getElementById('progress-label');
-const resultSection = document.getElementById('result-section');
-const resultCount = document.getElementById('result-count');
-const resultBody = document.getElementById('result-body');
-const btnExport = document.getElementById('btn-export');
-const logBox = document.getElementById('log-box');
+const $ = id => document.getElementById(id);
 
 function log(msg) {
-    logBox.textContent += msg + '\n';
-    logBox.scrollTop = logBox.scrollHeight;
+    const lb = $('log-box');
+    lb.textContent += msg + '\n';
+    lb.scrollTop = lb.scrollHeight;
 }
 
-// Drag & drop
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
+// ─── File upload ────────────────────────────────────────────────
+$('drop-zone').addEventListener('dragover', e => { e.preventDefault(); $('drop-zone').classList.add('drag-over'); });
+$('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('drag-over'));
+$('drop-zone').addEventListener('drop', e => {
     e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') loadPdf(file);
+    $('drop-zone').classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f?.type === 'application/pdf') loadPdf(f);
 });
-
-fileInput.addEventListener('change', e => {
-    if (e.target.files[0]) loadPdf(e.target.files[0]);
-});
+$('file-input').addEventListener('change', e => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
 
 async function loadPdf(file) {
-    logBox.textContent = '';
-    pageGrid.innerHTML = '';
+    $('log-box').textContent = '';
+    $('page-grid').innerHTML = '';
     log(`載入: ${file.name}`);
-
     const ab = await file.arrayBuffer();
     currentPdf = await pdfjsLib.getDocument(ab).promise;
     log(`總頁數: ${currentPdf.numPages}`);
 
     for (let i = 1; i <= currentPdf.numPages; i++) {
         const page = await currentPdf.getPage(i);
-        const vp = page.getViewport({ scale: 0.25 });
+        const vp = page.getViewport({ scale: 0.22 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
+        canvas.width = vp.width; canvas.height = vp.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
 
         const div = document.createElement('div');
         div.className = 'page-thumb';
         div.dataset.page = i;
-        div.innerHTML = `<div class="check">✓</div><div class="pg-label">P.${i}</div>`;
+        div.innerHTML = `<div class="ck">✓</div><div class="pg-label">P.${i}</div>`;
         div.prepend(canvas);
-        div.onclick = () => {
-            div.classList.toggle('selected');
-            updateSelCount();
-        };
-        pageGrid.appendChild(div);
+        div.onclick = () => { div.classList.toggle('selected'); updateSel(); };
+        $('page-grid').appendChild(div);
     }
 
-    pageSection.style.display = 'block';
-    resultSection.style.display = 'block';
-    updateSelCount();
+    $('page-section').style.display = 'block';
+    $('result-section').style.display = 'block';
+    updateSel();
 }
 
-function updateSelCount() {
+function updateSel() {
     const n = document.querySelectorAll('.page-thumb.selected').length;
-    selCount.textContent = `${n} 頁已選`;
-    btnScan.disabled = n === 0;
+    $('sel-count').textContent = n;
+    $('btn-scan').disabled = n === 0;
+}
+$('btn-all').onclick = () => { document.querySelectorAll('.page-thumb').forEach(d => d.classList.add('selected')); updateSel(); };
+$('btn-none').onclick = () => { document.querySelectorAll('.page-thumb').forEach(d => d.classList.remove('selected')); updateSel(); };
+
+// ─── Render page to base64 ──────────────────────────────────────
+async function pageToBase64(pageNum, scale = 1.8) {
+    const page = await currentPdf.getPage(pageNum);
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width; canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    // 用 JPEG 壓縮降低大小，品質 0.92 足夠 AI 辨識
+    return canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
 }
 
-document.getElementById('btn-all').onclick = () => {
-    document.querySelectorAll('.page-thumb').forEach(d => d.classList.add('selected'));
-    updateSelCount();
-};
-document.getElementById('btn-none').onclick = () => {
-    document.querySelectorAll('.page-thumb').forEach(d => d.classList.remove('selected'));
-    updateSelCount();
-};
+// ─── Call Claude Vision API ─────────────────────────────────────
+async function scanPageWithClaude(pageNum) {
+    log(`  渲染第 ${pageNum} 頁...`);
+    const b64 = await pageToBase64(pageNum, 1.8);
+    const kb = Math.round(b64.length * 0.75 / 1024);
+    log(`  圖片: ~${kb}KB，送出 API（預計 15-40 秒）...`);
+    $('progress-label').innerHTML = `<span class="spinner"></span><span class="scanning-msg">第 ${pageNum} 頁 AI 分析中，請稍候...（~15-40秒）</span>`;
 
-// ─── Core extractor ──────────────────────────────────────────────
-function getSelectedPages() {
-    return Array.from(document.querySelectorAll('.page-thumb.selected'))
-        .map(d => parseInt(d.dataset.page));
-}
+    const prompt = `這是一張7-ELEVEN指定商品清單的圖片。
+請找出所有有「6位數品號」的商品列，提取以下欄位：
+- 品號（6位數字）
+- 品名（完整商品名稱）
+- 原價（數字，若無則空白）
+- 活動方式（如「買1送1」、「買2送2」、「任選第2件10元」等，若無則空白）
 
-/**
- * 將 PDF 文字項目按「行」分組 (Y座標相近 = 同一行)
- * 再在同一行內依 X 座標排序拼接文字
- */
-function groupItemsIntoRows(items, yTolerance = 3) {
-    if (!items.length) return [];
+請嚴格以 JSON 格式回傳，範例：
+{"items":[{"code":"439352","name":"UCC無糖咖啡CAN185g","price":"35","promo":"買2送2"}]}
 
-    // 依 Y 降序排列（PDF座標Y軸向上）
-    const sorted = [...items].sort((a, b) => b.transform[5] - a.transform[5]);
+只回傳 JSON，不要任何其他文字。`;
 
-    const rows = [];
-    let currentRow = [sorted[0]];
-    let currentY = sorted[0].transform[5];
+    // 90秒 timeout，防止 Safari 無限卡住
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
 
-    for (let i = 1; i < sorted.length; i++) {
-        const item = sorted[i];
-        const y = item.transform[5];
-        if (Math.abs(y - currentY) <= yTolerance) {
-            currentRow.push(item);
+    let response;
+    try {
+        response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+                "Content-Type": "application/json",
+                "anthropic-dangerous-direct-browser-access": "true"
+            },
+            body: JSON.stringify({
+                model: "claude-sonnet-4-20250514",
+                max_tokens: 1000,
+                messages: [{
+                    role: "user",
+                    content: [
+                        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+                        { type: "text", text: prompt }
+                    ]
+                }]
+            })
+        });
+    } catch (err) {
+        clearTimeout(timer);
+        if (err.name === 'AbortError') {
+            log(`  ❌ 逾時（90秒無回應）。請重試或換 Chrome/電腦使用。`);
         } else {
-            rows.push(currentRow.sort((a, b) => a.transform[4] - b.transform[4]));
-            currentRow = [item];
-            currentY = y;
+            log(`  ❌ 網路錯誤: ${err.message}`);
         }
+        return [];
     }
-    rows.push(currentRow.sort((a, b) => a.transform[4] - b.transform[4]));
-    return rows;
+    clearTimeout(timer);
+
+    let data;
+    try {
+        data = await response.json();
+    } catch (e) {
+        log(`  ❌ 回應解析失敗: ${e.message}（HTTP ${response.status}）`);
+        return [];
+    }
+
+    if (data.error) {
+        log(`  ❌ API錯誤: ${JSON.stringify(data.error)}`);
+        return [];
+    }
+
+    const raw = data.content?.find(b => b.type === 'text')?.text || '';
+    log(`  API回應: ${raw.substring(0, 150)}`);
+
+    try {
+        const clean = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const parsed = JSON.parse(clean);
+        const items = (parsed.items || []).map(item => ({ ...item, page: pageNum }));
+        log(`  ✅ 找到 ${items.length} 筆商品`);
+        items.forEach(it => log(`     ${it.code}  ${it.name}  ${it.price || ''}  ${it.promo || ''}`));
+        return items;
+    } catch (e) {
+        log(`  ⚠️ JSON 解析失敗: ${e.message}\n  原始: ${raw}`);
+        return [];
+    }
 }
 
-/**
- * 從行陣列提取商品資訊
- * 支援格式：
- *   [品號] [品名] [價格]   (標準三欄)
- *   [品號] [品名]          (只有品號+品名)
- */
-function extractFromRows(rows, pageNum) {
-    const results = [];
-    const codePattern = /^\d{6}$/;
-    const pricePattern = /^\d{1,4}(\.\d{1,2})?$/;
-
-    for (const row of rows) {
-        const texts = row.map(item => item.str.trim()).filter(t => t.length > 0);
-        if (texts.length === 0) continue;
-
-        const rowText = texts.join(' ');
-
-        // 方式1：整行 regex 找 6位數字 + 中文/英文品名
-        // 允許品名含括號、英數字、空格
-        const matches = [...rowText.matchAll(/(\d{6})\s+(.+?)(?:\s{2,}|$)/g)];
-
-        for (const m of matches) {
-            const code = m[1];
-            let name = m[2].trim();
-
-            // 清理品名尾端的純數字（價格殘留）
-            name = name.replace(/\s+\d{1,4}(\.\d{1,2})?$/, '').trim();
-            // 清理過短或純數字品名
-            if (name.length < 2 || /^\d+$/.test(name)) continue;
-
-            // 嘗試找價格（行內其他純數字欄位）
-            let price = '';
-            for (const t of texts) {
-                if (pricePattern.test(t) && parseInt(t) > 0 && parseInt(t) < 50000) {
-                    const n = parseInt(t);
-                    // 排除品號本身
-                    if (t !== code && n !== parseInt(code)) {
-                        price = t;
-                        break;
-                    }
-                }
-            }
-
-            results.push({ code, name, price, page: pageNum });
-        }
-
-        // 方式2：逐欄掃描（處理以空格分欄的格式）
-        if (matches.length === 0) {
-            // 嘗試找第一個6位數字欄
-            let codeIdx = -1;
-            for (let i = 0; i < texts.length; i++) {
-                if (codePattern.test(texts[i])) { codeIdx = i; break; }
-            }
-            if (codeIdx < 0) continue;
-
-            const code = texts[codeIdx];
-            // 品名：品號後的文字，排除純數字欄
-            const nameParts = [];
-            let price = '';
-            for (let i = codeIdx + 1; i < texts.length; i++) {
-                if (pricePattern.test(texts[i]) && parseInt(texts[i]) < 50000) {
-                    if (!price) price = texts[i];
-                } else {
-                    nameParts.push(texts[i]);
-                }
-            }
-            const name = nameParts.join('').trim();
-            if (name.length >= 2) {
-                // 避免重複
-                if (!results.find(r => r.code === code && r.page === pageNum)) {
-                    results.push({ code, name, price, page: pageNum });
-                }
-            }
-        }
-    }
-    return results;
-}
-
-// ─── Scan ─────────────────────────────────────────────────────────
-btnScan.addEventListener('click', async () => {
-    const pages = getSelectedPages();
+// ─── Main scan ──────────────────────────────────────────────────
+$('btn-scan').addEventListener('click', async () => {
+    const pages = Array.from(document.querySelectorAll('.page-thumb.selected'))
+        .map(d => parseInt(d.dataset.page));
     if (!pages.length) return;
 
-    btnScan.disabled = true;
-    progressWrap.style.display = 'block';
+    $('btn-scan').disabled = true;
+    $('progress-wrap').style.display = 'block';
     allResults = [];
-    logBox.textContent = '';
-    resultBody.innerHTML = '';
+    $('log-box').textContent = '';
 
-    for (let idx = 0; idx < pages.length; idx++) {
-        const num = pages[idx];
-        const pct = Math.round((idx / pages.length) * 100);
-        progressFill.style.width = pct + '%';
-        progressLabel.textContent = `處理第 ${num} 頁 (${idx+1}/${pages.length})...`;
+    for (let i = 0; i < pages.length; i++) {
+        const num = pages[i];
+        const pct = Math.round((i / pages.length) * 100);
+        $('progress-fill').style.width = pct + '%';
+        $('progress-label').textContent = `第 ${num} 頁 (${i+1}/${pages.length})...`;
+        log(`\n── 掃描第 ${num} 頁 ──`);
 
-        const page = await currentPdf.getPage(num);
-        const content = await page.getTextContent();
+        const items = await scanPageWithClaude(num);
+        allResults.push(...items);
+        $('progress-label').textContent = `第 ${num} 頁完成，找到 ${items.length} 筆`;
 
-        log(`\n── 第 ${num} 頁 (共 ${content.items.length} 個文字項) ──`);
-
-        const rows = groupItemsIntoRows(content.items);
-        log(`  分組為 ${rows.length} 行`);
-
-        const found = extractFromRows(rows, num);
-        log(`  提取 ${found.length} 筆商品`);
-        found.forEach(r => log(`  ✓ ${r.code}  ${r.name}  ${r.price ? '($'+r.price+')' : ''}`));
-
-        allResults.push(...found);
+        // 即時更新表格
+        renderResults();
     }
 
-    progressFill.style.width = '100%';
-    progressLabel.textContent = `完成！共 ${allResults.length} 筆`;
-
-    renderResults();
-    btnScan.disabled = false;
+    $('progress-fill').style.width = '100%';
+    $('progress-label').textContent = `✅ 完成！共 ${allResults.length} 筆`;
+    $('btn-scan').disabled = false;
 });
 
+// ─── Render results ─────────────────────────────────────────────
 function renderResults() {
-    resultCount.textContent = allResults.length;
-    btnExport.disabled = allResults.length === 0;
+    $('result-count').textContent = allResults.length;
+    $('btn-export').disabled = allResults.length === 0;
 
     if (!allResults.length) {
-        resultBody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="icon">😅</div>未找到符合格式的商品，請確認頁面包含品號欄位</div></td></tr>';
+        $('result-body').innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="ei">😅</div>尚無資料</div></td></tr>';
         return;
     }
 
-    resultBody.innerHTML = allResults.map(r => `
+    $('result-body').innerHTML = allResults.map(r => `
         <tr>
             <td class="code-cell">${r.code}</td>
-            <td class="name-cell">${escHtml(r.name)}</td>
-            <td class="price-cell">${r.price ? r.price : '—'}</td>
+            <td>${esc(r.name)}</td>
+            <td class="price-cell">${r.price || '—'}</td>
+            <td class="promo-cell">${esc(r.promo || '—')}</td>
             <td class="page-cell">P.${r.page}</td>
         </tr>
     `).join('');
 }
 
-function escHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ─── Export CSV ───────────────────────────────────────────────────
-btnExport.addEventListener('click', () => {
+// ─── CSV Export ─────────────────────────────────────────────────
+$('btn-export').addEventListener('click', () => {
     const bom = '\uFEFF';
-    const header = '品號,品名,售價,頁碼\n';
+    const header = '品號,品名,原價,活動方式,頁碼\n';
     const rows = allResults.map(r =>
-        `${r.code},"${r.name.replace(/"/g,'""')}",${r.price},${r.page}`
+        `${r.code},"${String(r.name).replace(/"/g,'""')}",${r.price || ''},` +
+        `"${String(r.promo||'').replace(/"/g,'""')}",${r.page}`
     ).join('\n');
     const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
