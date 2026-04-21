@@ -217,27 +217,32 @@
 </head>
 <body>
 
-<h1>📦 PDF 商品提取 <span class="badge">Claude Vision</span></h1>
-<p class="subtitle">圖片型PDF專用 · AI精準辨識品號品名</p>
+<h1>📦 PDF 商品提取 <span class="badge">Gemini Vision</span></h1>
+<p class="subtitle">圖片型PDF專用 · Gemini Vision 免費辨識</p>
 
-<!-- Step 1: Upload -->
+<!-- Step 1: API Key -->
 <div class="card">
-    <div class="card-title">① 上傳 PDF</div>
+    <div class="card-title">① 輸入 Gemini API Key</div>
+    <input type="password" id="api-key-input" placeholder="AIzaSy..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#13151f;color:var(--text);font-size:13px;font-family:monospace;outline:none;">
+    <div class="note" style="margin-top:8px">
+        前往 <strong style="color:#a78bfa">aistudio.google.com</strong> → Get API Key → Create API Key。
+        免費使用，Key 只存在頁面記憶體，不會儲存。
+    </div>
+</div>
+
+<!-- Step 2: Upload -->
+<div class="card">
+    <div class="card-title">② 上傳 PDF</div>
     <div class="drop-zone" id="drop-zone">
         <input type="file" id="file-input" accept="application/pdf">
         <div class="di">📄</div>
         <div class="dl">點擊或拖曳 <span>PDF 檔案</span></div>
     </div>
-    <div class="note">
-        <strong>⚠️ 注意：</strong>此 PDF 每頁都是圖片（非向量文字），
-        使用 <strong>Claude Vision API</strong> 辨識，準確率遠高於 Tesseract OCR。
-        每頁約耗時 3-8 秒。
-    </div>
 </div>
 
 <!-- Step 2: Page select -->
 <div class="card" id="page-section" style="display:none">
-    <div class="card-title">② 選擇要掃描的頁面</div>
+    <div class="card-title">③ 選擇要掃描的頁面</div>
     <div class="sel-row">
         <span class="sel-info">已選 <span id="sel-count">0</span> 頁</span>
         <button class="mini-btn" id="btn-all">全選</button>
@@ -353,58 +358,49 @@ async function pageToBase64(pageNum, scale = 1.8) {
     return canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
 }
 
-// ─── Call Claude Vision API ─────────────────────────────────────
+// ─── Call Gemini Vision API (免費) ──────────────────────────────
 async function scanPageWithClaude(pageNum) {
     log(`  渲染第 ${pageNum} 頁...`);
     const b64 = await pageToBase64(pageNum, 1.8);
     const kb = Math.round(b64.length * 0.75 / 1024);
-    log(`  圖片: ~${kb}KB，送出 API（預計 15-40 秒）...`);
-    $('progress-label').innerHTML = `<span class="spinner"></span><span class="scanning-msg">第 ${pageNum} 頁 AI 分析中，請稍候...（~15-40秒）</span>`;
+    log(`  圖片: ~${kb}KB，送出 Gemini API...`);
+    $('progress-label').innerHTML = `<span class="spinner"></span><span class="scanning-msg">第 ${pageNum} 頁 AI 分析中，請稍候...</span>`;
+
+    const apiKey = $('api-key-input').value.trim();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const prompt = `這是一張7-ELEVEN指定商品清單的圖片。
 請找出所有有「6位數品號」的商品列，提取以下欄位：
-- 品號（6位數字）
-- 品名（完整商品名稱）
-- 原價（數字，若無則空白）
-- 活動方式（如「買1送1」、「買2送2」、「任選第2件10元」等，若無則空白）
+- code：品號（6位數字）
+- name：品名（完整商品名稱）
+- price：原價（純數字，若無則空字串）
+- promo：活動方式（如「買1送1」、「買2送2」等，若無則空字串）
 
-請嚴格以 JSON 格式回傳，範例：
-{"items":[{"code":"439352","name":"UCC無糖咖啡CAN185g","price":"35","promo":"買2送2"}]}
+嚴格只回傳 JSON，格式如下，不要任何其他文字：
+{items:[{code:439352,name:UCC無糖咖啡CAN185g,price:35,promo:買2送2}]}`;
 
-只回傳 JSON，不要任何其他文字。`;
-
-    // 90秒 timeout，防止 Safari 無限卡住
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90000);
 
     let response;
     try {
-        response = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
+        response = await fetch(url, {
+            method: 'POST',
             signal: controller.signal,
-            headers: {
-                "Content-Type": "application/json",
-                "anthropic-dangerous-direct-browser-access": "true"
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: "claude-sonnet-4-20250514",
-                max_tokens: 1000,
-                messages: [{
-                    role: "user",
-                    content: [
-                        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-                        { type: "text", text: prompt }
+                contents: [{
+                    parts: [
+                        { inline_data: { mime_type: 'image/jpeg', data: b64 } },
+                        { text: prompt }
                     ]
-                }]
+                }],
+                generationConfig: { temperature: 0, maxOutputTokens: 2048 }
             })
         });
     } catch (err) {
         clearTimeout(timer);
-        if (err.name === 'AbortError') {
-            log(`  ❌ 逾時（90秒無回應）。請重試或換 Chrome/電腦使用。`);
-        } else {
-            log(`  ❌ 網路錯誤: ${err.message}`);
-        }
+        log(`  ❌ ${err.name === 'AbortError' ? '逾時（90秒）' : '網路錯誤: ' + err.message}`);
         return [];
     }
     clearTimeout(timer);
@@ -413,17 +409,17 @@ async function scanPageWithClaude(pageNum) {
     try {
         data = await response.json();
     } catch (e) {
-        log(`  ❌ 回應解析失敗: ${e.message}（HTTP ${response.status}）`);
+        log(`  ❌ 回應解析失敗 (HTTP ${response.status})`);
         return [];
     }
 
     if (data.error) {
-        log(`  ❌ API錯誤: ${JSON.stringify(data.error)}`);
+        log(`  ❌ API錯誤: ${data.error.message}`);
         return [];
     }
 
-    const raw = data.content?.find(b => b.type === 'text')?.text || '';
-    log(`  API回應: ${raw.substring(0, 150)}`);
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    log(`  Gemini回應: ${raw.substring(0, 150)}`);
 
     try {
         const clean = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -433,13 +429,19 @@ async function scanPageWithClaude(pageNum) {
         items.forEach(it => log(`     ${it.code}  ${it.name}  ${it.price || ''}  ${it.promo || ''}`));
         return items;
     } catch (e) {
-        log(`  ⚠️ JSON 解析失敗: ${e.message}\n  原始: ${raw}`);
+        log(`  ⚠️ JSON解析失敗: ${e.message}
+  原始: ${raw}`);
         return [];
     }
 }
 
 // ─── Main scan ──────────────────────────────────────────────────
 $('btn-scan').addEventListener('click', async () => {
+    const apiKey = $('api-key-input').value.trim();
+    if (!apiKey.startsWith('AIza') && apiKey.length < 20) {
+        alert('請先輸入有效的 Gemini API Key（以 AIza 開頭）');
+        return;
+    }
     const pages = Array.from(document.querySelectorAll('.page-thumb.selected'))
         .map(d => parseInt(d.dataset.page));
     if (!pages.length) return;
