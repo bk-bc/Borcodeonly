@@ -2,59 +2,85 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>專業版 PDF 商品提取器</title>
+    <title>終極 PDF 商品提取系統 (整合版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://unpkg.com/tesseract.js@v4.0.1/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; padding: 20px; }
-        .setup-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; margin-top: 20px; max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; border-radius: 8px; }
-        .page-item { border: 2px solid #eee; padding: 5px; text-align: center; border-radius: 8px; cursor: pointer; position: relative; }
+        body { font-family: -apple-system, sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        
+        /* 預覽區樣式 */
+        .preview-grid { 
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); 
+            gap: 15px; margin-top: 15px; max-height: 350px; overflow-y: auto; 
+            border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fafafa;
+        }
+        .page-item { border: 2px solid #eee; padding: 5px; text-align: center; border-radius: 8px; cursor: pointer; position: relative; background: white; }
         .page-item.selected { border-color: #007bff; background: #e7f1ff; }
-        .page-item canvas { width: 100%; border-radius: 4px; }
-        .page-item input { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; }
-        #log-panel { background: #222; color: #0f0; padding: 15px; border-radius: 8px; font-family: monospace; height: 300px; overflow-y: auto; }
-        .step-title { font-weight: bold; margin: 20px 0 10px; color: #333; }
-        button { background: #007bff; color: white; border: none; padding: 10px 25px; border-radius: 6px; cursor: pointer; font-size: 16px; }
-        button:disabled { background: #ccc; }
+        .page-item canvas { width: 100%; border-radius: 4px; display: block; }
+        .page-item input { position: absolute; top: 5px; left: 5px; width: 20px; height: 20px; z-index: 10; }
+
+        /* 控制區樣式 */
+        .controls { display: flex; gap: 10px; margin: 15px 0; align-items: center; }
+        .btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-ai { background: #28a745; color: white; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* 結果顯示區 */
+        #log-panel { background: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 8px; font-family: 'Consolas', monospace; height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 14px; }
+        .status-msg { color: #007bff; font-weight: bold; margin-bottom: 10px; }
+        #hidden-canvas { display: none; }
     </style>
 </head>
 <body>
 
-<div class="setup-card">
-    <h2>🛠 專業 PDF 提取系統</h2>
-    
-    <div class="step-title">第一步：選取檔案並挑選頁面</div>
-    <input type="file" id="pdf-file" accept="application/pdf">
-    
-    <div id="preview-container" style="display:none;">
-        <div class="preview-grid" id="thumbnail-grid"></div>
-        <div style="margin-top: 15px;">
-            <button id="start-scan">開始掃描勾選頁面</button>
+<div class="container">
+    <div class="card">
+        <h2>📦 終極 PDF 商品提取系統</h2>
+        <p>1. 選擇檔案 → 2. 勾選欲掃描頁面 → 3. 選擇掃描模式</p>
+        <input type="file" id="file-input" accept="application/pdf">
+        
+        <div id="preview-section" style="display:none;">
+            <div class="preview-grid" id="thumbnail-grid"></div>
+            <div class="controls">
+                <button id="btn-text-scan" class="btn btn-primary">⚡ 快速文字掃描 (推薦)</button>
+                <button id="btn-ocr-scan" class="btn btn-ai">🤖 AI 視覺掃描 (精準但慢)</button>
+                <span id="status-text" class="status-msg"></span>
+            </div>
         </div>
+    </div>
+
+    <div class="card">
+        <div id="log-panel">等待操作中...</div>
     </div>
 </div>
 
-<div class="setup-card">
-    <div class="step-title">第二步：掃描結果 (自動過濾 6 位數編號)</div>
-    <div id="log-panel">尚未開始掃描...</div>
-</div>
+<canvas id="hidden-canvas"></canvas>
 
 <script>
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
     let currentPdf = null;
+    const fileInput = document.getElementById('file-input');
+    const thumbnailGrid = document.getElementById('thumbnail-grid');
+    const logPanel = document.getElementById('log-panel');
+    const statusText = document.getElementById('status-text');
+    const hiddenCanvas = document.getElementById('hidden-canvas');
 
-    document.getElementById('pdf-file').addEventListener('change', async (e) => {
+    // 1. 檔案選取與縮圖產生
+    fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
+        logPanel.innerText = "正在讀取 PDF 結構...";
         const arrayBuffer = await file.arrayBuffer();
         currentPdf = await pdfjsLib.getDocument(arrayBuffer).promise;
         
-        const grid = document.getElementById('thumbnail-grid');
-        grid.innerHTML = '';
-        document.getElementById('preview-container').style.display = 'block';
+        thumbnailGrid.innerHTML = '';
+        document.getElementById('preview-section').style.display = 'block';
 
         for (let i = 1; i <= currentPdf.numPages; i++) {
             const page = await currentPdf.getPage(i);
@@ -62,52 +88,101 @@
             
             const div = document.createElement('div');
             div.className = 'page-item';
-            div.onclick = () => {
-                const cb = div.querySelector('input');
-                cb.checked = !cb.checked;
-                div.classList.toggle('selected', cb.checked);
-            };
-
+            div.innerHTML = `<input type="checkbox" value="${i}" id="p${i}"><label for="p${i}">P.${i}</label>`;
+            
             const canvas = document.createElement('canvas');
             canvas.height = viewport.height;
             canvas.width = viewport.width;
-            const ctx = canvas.getContext('2d');
-            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-
-            div.innerHTML = `<input type="checkbox" value="${i}"><div>P.${i}</div>`;
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+            
             div.prepend(canvas);
-            grid.appendChild(div);
+            div.onclick = (event) => {
+                if(event.target.tagName !== 'INPUT') {
+                    const cb = div.querySelector('input');
+                    cb.checked = !cb.checked;
+                }
+                div.classList.toggle('selected', div.querySelector('input').checked);
+            };
+            thumbnailGrid.appendChild(div);
         }
+        logPanel.innerText = `PDF 讀取完成，共 ${currentPdf.numPages} 頁。請勾選要辨識的頁面。`;
     });
 
-    document.getElementById('start-scan').addEventListener('click', async () => {
-        const selectedPages = Array.from(document.querySelectorAll('.page-item input:checked')).map(cb => parseInt(cb.value));
-        const log = document.getElementById('log-panel');
-        log.innerText = "開始提取文字資料...\n";
+    // 取得選取的頁碼
+    function getSelectedPages() {
+        return Array.from(document.querySelectorAll('.page-item input:checked')).map(cb => parseInt(cb.value));
+    }
 
-        for (const pageNum of selectedPages) {
-            log.innerText += `正在處理第 ${pageNum} 頁...\n`;
-            const page = await currentPdf.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            
-            // 關鍵優化：依照座標排序文字（由上到下，由左到右）
-            const items = textContent.items.sort((a, b) => {
-                if (Math.abs(a.transform[5] - b.transform[5]) < 5) { // 同一行
-                    return a.transform[4] - b.transform[4];
-                }
-                return b.transform[5] - a.transform[5]; // 不同行
-            });
-
-            const rawText = items.map(item => item.str).join(' ');
-            
-            // 使用正規表示式提取
-            const regex = /(\d{6})\s+([^\d\n\r]{2,})/g;
-            let match;
-            while ((match = regex.exec(rawText)) !== null) {
-                log.innerText += `✔️ [找到] ${match[1]} ${match[2].trim().substring(0, 20)}\n`;
+    // 通用提取邏輯 (Regex)
+    function extractData(text) {
+        const results = [];
+        // 規則：6位數字 + 空白 + 非數字文字 (品名)
+        const regex = /(\d{6})\s+([^\d\n\r]{2,})/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            // 品名處理：擷取後方文字，若遇到過長空白則切斷(無視價格)
+            const cleanName = match[2].trim().split(/\s{2,}/)[0];
+            if (cleanName.length > 1) {
+                results.push(`${match[1]} ${cleanName}`);
             }
         }
-        log.innerText += "\n--- 掃描結束 ---";
+        return results;
+    }
+
+    // 模式一：快速文字掃描 (帶座標排序)
+    document.getElementById('btn-text-scan').addEventListener('click', async () => {
+        const pages = getSelectedPages();
+        if (pages.length === 0) return alert("請先勾選頁面");
+
+        logPanel.innerText = "開始執行快速掃描...\n";
+        for (const num of pages) {
+            statusText.innerText = `處理第 ${num} 頁...`;
+            const page = await currentPdf.getPage(num);
+            const content = await page.getTextContent();
+            
+            // 座標排序邏輯：由上至下(Y)，由左至右(X)
+            const sortedItems = content.items.sort((a, b) => {
+                if (Math.abs(a.transform[5] - b.transform[5]) < 5) return a.transform[4] - b.transform[4];
+                return b.transform[5] - a.transform[5];
+            });
+
+            const pageText = sortedItems.map(item => item.str).join(' ');
+            const found = extractData(pageText);
+            
+            logPanel.innerText += `--- 第 ${num} 頁 (找到 ${found.length} 筆) ---\n`;
+            logPanel.innerText += found.join('\n') + '\n\n';
+        }
+        statusText.innerText = "掃描完成";
+    });
+
+    // 模式二：AI 視覺掃描 (OCR)
+    document.getElementById('btn-ocr-scan').addEventListener('click', async () => {
+        const pages = getSelectedPages();
+        if (pages.length === 0) return alert("請先勾選頁面");
+
+        logPanel.innerText = "正在啟動 AI 辨識引擎 (首次啟動較慢)... \n";
+        const worker = await Tesseract.createWorker();
+        await worker.loadLanguage('chi_tra+eng');
+        await worker.initialize('chi_tra+eng');
+
+        for (const num of pages) {
+            statusText.innerText = `AI 正在讀取第 ${num} 頁圖片...`;
+            const page = await currentPdf.getPage(num);
+            const viewport = page.getViewport({ scale: 2.0 }); // 放大提高辨識率
+            
+            hiddenCanvas.height = viewport.height;
+            hiddenCanvas.width = viewport.width;
+            await page.render({ canvasContext: hiddenCanvas.getContext('2d'), viewport: viewport }).promise;
+
+            const { data: { text } } = await worker.recognize(hiddenCanvas);
+            const found = extractData(text);
+
+            logPanel.innerText += `--- 第 ${num} 頁 [AI模式] (找到 ${found.length} 筆) ---\n`;
+            logPanel.innerText += found.join('\n') + '\n\n';
+        }
+
+        await worker.terminate();
+        statusText.innerText = "AI 掃描完成";
     });
 </script>
 
