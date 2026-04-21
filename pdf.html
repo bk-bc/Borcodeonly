@@ -1,190 +1,539 @@
-<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>終極 PDF 商品提取系統 (整合版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF 商品提取 v2</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-    <script src="https://unpkg.com/tesseract.js@v4.0.1/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: -apple-system, sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        
-        /* 預覽區樣式 */
-        .preview-grid { 
-            display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); 
-            gap: 15px; margin-top: 15px; max-height: 350px; overflow-y: auto; 
-            border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fafafa;
+        :root {
+            --bg: #0f1117;
+            --card: #1a1d27;
+            --border: #2a2d3e;
+            --accent: #4f8ef7;
+            --green: #3ecf8e;
+            --yellow: #f7c948;
+            --red: #f74f6a;
+            --text: #e8eaf0;
+            --muted: #6b7280;
         }
-        .page-item { border: 2px solid #eee; padding: 5px; text-align: center; border-radius: 8px; cursor: pointer; position: relative; background: white; }
-        .page-item.selected { border-color: #007bff; background: #e7f1ff; }
-        .page-item canvas { width: 100%; border-radius: 4px; display: block; }
-        .page-item input { position: absolute; top: 5px; left: 5px; width: 20px; height: 20px; z-index: 10; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'SF Pro Display', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 24px 16px;
+        }
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+        .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 
-        /* 控制區樣式 */
-        .controls { display: flex; gap: 10px; margin: 15px 0; align-items: center; }
-        .btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        .btn-primary { background: #007bff; color: white; }
-        .btn-ai { background: #28a745; color: white; }
-        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
 
-        /* 結果顯示區 */
-        #log-panel { background: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 8px; font-family: 'Consolas', monospace; height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 14px; }
-        .status-msg { color: #007bff; font-weight: bold; margin-bottom: 10px; }
-        #hidden-canvas { display: none; }
+        /* File drop zone */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 28px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent);
+            background: rgba(79,142,247,0.05);
+        }
+        .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+        .drop-icon { font-size: 32px; margin-bottom: 8px; }
+        .drop-label { font-size: 14px; color: var(--muted); }
+        .drop-label span { color: var(--accent); }
+
+        /* Page selector */
+        .page-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 8px;
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 4px;
+        }
+        .page-thumb {
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.15s;
+        }
+        .page-thumb.selected { border-color: var(--accent); }
+        .page-thumb canvas { display: block; width: 100%; }
+        .page-thumb .pg-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.65);
+            font-size: 10px; text-align: center; padding: 2px 0;
+            color: #fff;
+        }
+        .page-thumb .check {
+            position: absolute; top: 4px; right: 4px;
+            width: 18px; height: 18px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 11px;
+        }
+        .page-thumb.selected .check { display: flex; }
+
+        /* Select all row */
+        .sel-row {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 10px; font-size: 13px;
+        }
+        .sel-row button {
+            background: none; border: 1px solid var(--border);
+            color: var(--muted); border-radius: 6px;
+            padding: 4px 10px; cursor: pointer; font-size: 12px;
+            transition: 0.15s;
+        }
+        .sel-row button:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Scan button */
+        .scan-btn {
+            display: flex; align-items: center; justify-content: center; gap-8px;
+            width: 100%; padding: 12px;
+            background: var(--accent);
+            border: none; border-radius: 10px;
+            color: #fff; font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: 0.2s;
+            margin-top: 12px;
+        }
+        .scan-btn:hover { background: #3d7de8; }
+        .scan-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+        /* Progress */
+        .progress-wrap { margin-top: 10px; display: none; }
+        .progress-bar {
+            height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%; background: var(--accent);
+            width: 0%; transition: width 0.3s;
+        }
+        .progress-label { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+        /* Results */
+        .result-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .result-count {
+            font-size: 13px; color: var(--muted);
+        }
+        .result-count span { color: var(--green); font-weight: 700; }
+
+        .export-btn {
+            background: var(--green); border: none; border-radius: 8px;
+            color: #0f1117; font-size: 12px; font-weight: 700;
+            padding: 6px 14px; cursor: pointer; transition: 0.2s;
+        }
+        .export-btn:hover { background: #35b87d; }
+        .export-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+        /* Table */
+        .result-table-wrap {
+            max-height: 420px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th {
+            background: #13151f;
+            padding: 8px 12px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: sticky; top: 0; z-index: 1;
+        }
+        td {
+            padding: 8px 12px;
+            border-top: 1px solid var(--border);
+        }
+        tr:hover td { background: rgba(255,255,255,0.02); }
+        .code-cell { font-family: 'SF Mono', monospace; color: var(--yellow); font-size: 12px; white-space: nowrap; }
+        .name-cell { color: var(--text); }
+        .page-cell { color: var(--muted); font-size: 11px; }
+        .price-cell { color: var(--green); font-size: 12px; white-space: nowrap; }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center; padding: 40px 16px;
+            color: var(--muted); font-size: 13px;
+        }
+        .empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+
+        /* Log */
+        details { margin-top: 12px; }
+        summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+        .log-box {
+            background: #0a0b10; border-radius: 8px; padding: 12px;
+            font-family: monospace; font-size: 11px; color: #5cdb95;
+            max-height: 200px; overflow-y: auto;
+            margin-top: 8px; white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="card">
-        <h2>📦 終極 PDF 商品提取系統</h2>
-        <p>1. 選擇檔案 → 2. 勾選欲掃描頁面 → 3. 選擇掃描模式</p>
-        <input type="file" id="file-input" accept="application/pdf">
-        
-        <div id="preview-section" style="display:none;">
-            <div class="preview-grid" id="thumbnail-grid"></div>
-            <div class="controls">
-                <button id="btn-text-scan" class="btn btn-primary">⚡ 快速文字掃描 (推薦)</button>
-                <button id="btn-ocr-scan" class="btn btn-ai">🤖 AI 視覺掃描 (精準但慢)</button>
-                <span id="status-text" class="status-msg"></span>
-            </div>
-        </div>
-    </div>
+<h1>📦 PDF 商品提取 v2</h1>
+<p class="subtitle">精準提取品號 + 品名，支援CSV匯出</p>
 
-    <div class="card">
-        <div id="log-panel">等待操作中...</div>
+<div class="card">
+    <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="application/pdf">
+        <div class="drop-icon">📄</div>
+        <div class="drop-label">點擊或拖曳 <span>PDF 檔案</span> 到此處</div>
     </div>
 </div>
 
-<canvas id="hidden-canvas"></canvas>
+<div class="card" id="page-section" style="display:none">
+    <div class="sel-row">
+        <span id="sel-count" style="color:var(--muted); font-size:13px;">0 頁已選</span>
+        <button id="btn-all">全選</button>
+        <button id="btn-none">清除</button>
+    </div>
+    <div class="page-grid" id="page-grid"></div>
+    <button class="scan-btn" id="btn-scan" disabled>⚡ 開始掃描</button>
+    <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-label" id="progress-label">處理中...</div>
+    </div>
+</div>
+
+<div class="card" id="result-section" style="display:none">
+    <div class="result-header">
+        <div class="result-count">找到 <span id="result-count">0</span> 筆商品</div>
+        <button class="export-btn" id="btn-export" disabled>⬇ 匯出 CSV</button>
+    </div>
+    <div class="result-table-wrap">
+        <table id="result-table">
+            <thead>
+                <tr>
+                    <th>品號</th>
+                    <th>品名</th>
+                    <th>售價</th>
+                    <th>頁</th>
+                </tr>
+            </thead>
+            <tbody id="result-body">
+                <tr><td colspan="4"><div class="empty-state"><div class="icon">🔍</div>尚無資料</div></td></tr>
+            </tbody>
+        </table>
+    </div>
+    <details>
+        <summary>除錯日誌</summary>
+        <div class="log-box" id="log-box"></div>
+    </details>
+</div>
 
 <script>
-    const pdfjsLib = window['pdfjs-dist/build/pdf'];
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-    let currentPdf = null;
-    const fileInput = document.getElementById('file-input');
-    const thumbnailGrid = document.getElementById('thumbnail-grid');
-    const logPanel = document.getElementById('log-panel');
-    const statusText = document.getElementById('status-text');
-    const hiddenCanvas = document.getElementById('hidden-canvas');
+let currentPdf = null;
+let allResults = [];
 
-    // 1. 檔案選取與縮圖產生
-    fileInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+const fileInput = document.getElementById('file-input');
+const dropZone = document.getElementById('drop-zone');
+const pageSection = document.getElementById('page-section');
+const pageGrid = document.getElementById('page-grid');
+const selCount = document.getElementById('sel-count');
+const btnScan = document.getElementById('btn-scan');
+const progressWrap = document.getElementById('progress-wrap');
+const progressFill = document.getElementById('progress-fill');
+const progressLabel = document.getElementById('progress-label');
+const resultSection = document.getElementById('result-section');
+const resultCount = document.getElementById('result-count');
+const resultBody = document.getElementById('result-body');
+const btnExport = document.getElementById('btn-export');
+const logBox = document.getElementById('log-box');
 
-        logPanel.innerText = "正在讀取 PDF 結構...";
-        const arrayBuffer = await file.arrayBuffer();
-        currentPdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-        
-        thumbnailGrid.innerHTML = '';
-        document.getElementById('preview-section').style.display = 'block';
+function log(msg) {
+    logBox.textContent += msg + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
+}
 
-        for (let i = 1; i <= currentPdf.numPages; i++) {
-            const page = await currentPdf.getPage(i);
-            const viewport = page.getViewport({ scale: 0.2 });
-            
-            const div = document.createElement('div');
-            div.className = 'page-item';
-            div.innerHTML = `<input type="checkbox" value="${i}" id="p${i}"><label for="p${i}">P.${i}</label>`;
-            
-            const canvas = document.createElement('canvas');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
-            
-            div.prepend(canvas);
-            div.onclick = (event) => {
-                if(event.target.tagName !== 'INPUT') {
-                    const cb = div.querySelector('input');
-                    cb.checked = !cb.checked;
-                }
-                div.classList.toggle('selected', div.querySelector('input').checked);
-            };
-            thumbnailGrid.appendChild(div);
-        }
-        logPanel.innerText = `PDF 讀取完成，共 ${currentPdf.numPages} 頁。請勾選要辨識的頁面。`;
-    });
+// Drag & drop
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') loadPdf(file);
+});
 
-    // 取得選取的頁碼
-    function getSelectedPages() {
-        return Array.from(document.querySelectorAll('.page-item input:checked')).map(cb => parseInt(cb.value));
+fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) loadPdf(e.target.files[0]);
+});
+
+async function loadPdf(file) {
+    logBox.textContent = '';
+    pageGrid.innerHTML = '';
+    log(`載入: ${file.name}`);
+
+    const ab = await file.arrayBuffer();
+    currentPdf = await pdfjsLib.getDocument(ab).promise;
+    log(`總頁數: ${currentPdf.numPages}`);
+
+    for (let i = 1; i <= currentPdf.numPages; i++) {
+        const page = await currentPdf.getPage(i);
+        const vp = page.getViewport({ scale: 0.25 });
+        const canvas = document.createElement('canvas');
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+
+        const div = document.createElement('div');
+        div.className = 'page-thumb';
+        div.dataset.page = i;
+        div.innerHTML = `<div class="check">✓</div><div class="pg-label">P.${i}</div>`;
+        div.prepend(canvas);
+        div.onclick = () => {
+            div.classList.toggle('selected');
+            updateSelCount();
+        };
+        pageGrid.appendChild(div);
     }
 
-    // 通用提取邏輯 (Regex)
-    function extractData(text) {
-        const results = [];
-        // 規則：6位數字 + 空白 + 非數字文字 (品名)
-        const regex = /(\d{6})\s+([^\d\n\r]{2,})/g;
-        let match;
-        while ((match = regex.exec(text)) !== null) {
-            // 品名處理：擷取後方文字，若遇到過長空白則切斷(無視價格)
-            const cleanName = match[2].trim().split(/\s{2,}/)[0];
-            if (cleanName.length > 1) {
-                results.push(`${match[1]} ${cleanName}`);
+    pageSection.style.display = 'block';
+    resultSection.style.display = 'block';
+    updateSelCount();
+}
+
+function updateSelCount() {
+    const n = document.querySelectorAll('.page-thumb.selected').length;
+    selCount.textContent = `${n} 頁已選`;
+    btnScan.disabled = n === 0;
+}
+
+document.getElementById('btn-all').onclick = () => {
+    document.querySelectorAll('.page-thumb').forEach(d => d.classList.add('selected'));
+    updateSelCount();
+};
+document.getElementById('btn-none').onclick = () => {
+    document.querySelectorAll('.page-thumb').forEach(d => d.classList.remove('selected'));
+    updateSelCount();
+};
+
+// ─── Core extractor ──────────────────────────────────────────────
+function getSelectedPages() {
+    return Array.from(document.querySelectorAll('.page-thumb.selected'))
+        .map(d => parseInt(d.dataset.page));
+}
+
+/**
+ * 將 PDF 文字項目按「行」分組 (Y座標相近 = 同一行)
+ * 再在同一行內依 X 座標排序拼接文字
+ */
+function groupItemsIntoRows(items, yTolerance = 3) {
+    if (!items.length) return [];
+
+    // 依 Y 降序排列（PDF座標Y軸向上）
+    const sorted = [...items].sort((a, b) => b.transform[5] - a.transform[5]);
+
+    const rows = [];
+    let currentRow = [sorted[0]];
+    let currentY = sorted[0].transform[5];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const item = sorted[i];
+        const y = item.transform[5];
+        if (Math.abs(y - currentY) <= yTolerance) {
+            currentRow.push(item);
+        } else {
+            rows.push(currentRow.sort((a, b) => a.transform[4] - b.transform[4]));
+            currentRow = [item];
+            currentY = y;
+        }
+    }
+    rows.push(currentRow.sort((a, b) => a.transform[4] - b.transform[4]));
+    return rows;
+}
+
+/**
+ * 從行陣列提取商品資訊
+ * 支援格式：
+ *   [品號] [品名] [價格]   (標準三欄)
+ *   [品號] [品名]          (只有品號+品名)
+ */
+function extractFromRows(rows, pageNum) {
+    const results = [];
+    const codePattern = /^\d{6}$/;
+    const pricePattern = /^\d{1,4}(\.\d{1,2})?$/;
+
+    for (const row of rows) {
+        const texts = row.map(item => item.str.trim()).filter(t => t.length > 0);
+        if (texts.length === 0) continue;
+
+        const rowText = texts.join(' ');
+
+        // 方式1：整行 regex 找 6位數字 + 中文/英文品名
+        // 允許品名含括號、英數字、空格
+        const matches = [...rowText.matchAll(/(\d{6})\s+(.+?)(?:\s{2,}|$)/g)];
+
+        for (const m of matches) {
+            const code = m[1];
+            let name = m[2].trim();
+
+            // 清理品名尾端的純數字（價格殘留）
+            name = name.replace(/\s+\d{1,4}(\.\d{1,2})?$/, '').trim();
+            // 清理過短或純數字品名
+            if (name.length < 2 || /^\d+$/.test(name)) continue;
+
+            // 嘗試找價格（行內其他純數字欄位）
+            let price = '';
+            for (const t of texts) {
+                if (pricePattern.test(t) && parseInt(t) > 0 && parseInt(t) < 50000) {
+                    const n = parseInt(t);
+                    // 排除品號本身
+                    if (t !== code && n !== parseInt(code)) {
+                        price = t;
+                        break;
+                    }
+                }
+            }
+
+            results.push({ code, name, price, page: pageNum });
+        }
+
+        // 方式2：逐欄掃描（處理以空格分欄的格式）
+        if (matches.length === 0) {
+            // 嘗試找第一個6位數字欄
+            let codeIdx = -1;
+            for (let i = 0; i < texts.length; i++) {
+                if (codePattern.test(texts[i])) { codeIdx = i; break; }
+            }
+            if (codeIdx < 0) continue;
+
+            const code = texts[codeIdx];
+            // 品名：品號後的文字，排除純數字欄
+            const nameParts = [];
+            let price = '';
+            for (let i = codeIdx + 1; i < texts.length; i++) {
+                if (pricePattern.test(texts[i]) && parseInt(texts[i]) < 50000) {
+                    if (!price) price = texts[i];
+                } else {
+                    nameParts.push(texts[i]);
+                }
+            }
+            const name = nameParts.join('').trim();
+            if (name.length >= 2) {
+                // 避免重複
+                if (!results.find(r => r.code === code && r.page === pageNum)) {
+                    results.push({ code, name, price, page: pageNum });
+                }
             }
         }
-        return results;
+    }
+    return results;
+}
+
+// ─── Scan ─────────────────────────────────────────────────────────
+btnScan.addEventListener('click', async () => {
+    const pages = getSelectedPages();
+    if (!pages.length) return;
+
+    btnScan.disabled = true;
+    progressWrap.style.display = 'block';
+    allResults = [];
+    logBox.textContent = '';
+    resultBody.innerHTML = '';
+
+    for (let idx = 0; idx < pages.length; idx++) {
+        const num = pages[idx];
+        const pct = Math.round((idx / pages.length) * 100);
+        progressFill.style.width = pct + '%';
+        progressLabel.textContent = `處理第 ${num} 頁 (${idx+1}/${pages.length})...`;
+
+        const page = await currentPdf.getPage(num);
+        const content = await page.getTextContent();
+
+        log(`\n── 第 ${num} 頁 (共 ${content.items.length} 個文字項) ──`);
+
+        const rows = groupItemsIntoRows(content.items);
+        log(`  分組為 ${rows.length} 行`);
+
+        const found = extractFromRows(rows, num);
+        log(`  提取 ${found.length} 筆商品`);
+        found.forEach(r => log(`  ✓ ${r.code}  ${r.name}  ${r.price ? '($'+r.price+')' : ''}`));
+
+        allResults.push(...found);
     }
 
-    // 模式一：快速文字掃描 (帶座標排序)
-    document.getElementById('btn-text-scan').addEventListener('click', async () => {
-        const pages = getSelectedPages();
-        if (pages.length === 0) return alert("請先勾選頁面");
+    progressFill.style.width = '100%';
+    progressLabel.textContent = `完成！共 ${allResults.length} 筆`;
 
-        logPanel.innerText = "開始執行快速掃描...\n";
-        for (const num of pages) {
-            statusText.innerText = `處理第 ${num} 頁...`;
-            const page = await currentPdf.getPage(num);
-            const content = await page.getTextContent();
-            
-            // 座標排序邏輯：由上至下(Y)，由左至右(X)
-            const sortedItems = content.items.sort((a, b) => {
-                if (Math.abs(a.transform[5] - b.transform[5]) < 5) return a.transform[4] - b.transform[4];
-                return b.transform[5] - a.transform[5];
-            });
+    renderResults();
+    btnScan.disabled = false;
+});
 
-            const pageText = sortedItems.map(item => item.str).join(' ');
-            const found = extractData(pageText);
-            
-            logPanel.innerText += `--- 第 ${num} 頁 (找到 ${found.length} 筆) ---\n`;
-            logPanel.innerText += found.join('\n') + '\n\n';
-        }
-        statusText.innerText = "掃描完成";
-    });
+function renderResults() {
+    resultCount.textContent = allResults.length;
+    btnExport.disabled = allResults.length === 0;
 
-    // 模式二：AI 視覺掃描 (OCR)
-    document.getElementById('btn-ocr-scan').addEventListener('click', async () => {
-        const pages = getSelectedPages();
-        if (pages.length === 0) return alert("請先勾選頁面");
+    if (!allResults.length) {
+        resultBody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="icon">😅</div>未找到符合格式的商品，請確認頁面包含品號欄位</div></td></tr>';
+        return;
+    }
 
-        logPanel.innerText = "正在啟動 AI 辨識引擎 (首次啟動較慢)... \n";
-        const worker = await Tesseract.createWorker();
-        await worker.loadLanguage('chi_tra+eng');
-        await worker.initialize('chi_tra+eng');
+    resultBody.innerHTML = allResults.map(r => `
+        <tr>
+            <td class="code-cell">${r.code}</td>
+            <td class="name-cell">${escHtml(r.name)}</td>
+            <td class="price-cell">${r.price ? r.price : '—'}</td>
+            <td class="page-cell">P.${r.page}</td>
+        </tr>
+    `).join('');
+}
 
-        for (const num of pages) {
-            statusText.innerText = `AI 正在讀取第 ${num} 頁圖片...`;
-            const page = await currentPdf.getPage(num);
-            const viewport = page.getViewport({ scale: 2.0 }); // 放大提高辨識率
-            
-            hiddenCanvas.height = viewport.height;
-            hiddenCanvas.width = viewport.width;
-            await page.render({ canvasContext: hiddenCanvas.getContext('2d'), viewport: viewport }).promise;
+function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-            const { data: { text } } = await worker.recognize(hiddenCanvas);
-            const found = extractData(text);
-
-            logPanel.innerText += `--- 第 ${num} 頁 [AI模式] (找到 ${found.length} 筆) ---\n`;
-            logPanel.innerText += found.join('\n') + '\n\n';
-        }
-
-        await worker.terminate();
-        statusText.innerText = "AI 掃描完成";
-    });
+// ─── Export CSV ───────────────────────────────────────────────────
+btnExport.addEventListener('click', () => {
+    const bom = '\uFEFF';
+    const header = '品號,品名,售價,頁碼\n';
+    const rows = allResults.map(r =>
+        `${r.code},"${r.name.replace(/"/g,'""')}",${r.price},${r.page}`
+    ).join('\n');
+    const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'products.csv'; a.click();
+    URL.revokeObjectURL(url);
+});
 </script>
-
 </body>
 </html>
