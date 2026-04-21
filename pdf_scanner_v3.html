@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF 商品提取 v3 (Claude Vision)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --card: #1a1d27;
+            --border: #2a2d3e;
+            --accent: #4f8ef7;
+            --green: #3ecf8e;
+            --yellow: #f7c948;
+            --red: #f74f6a;
+            --text: #e8eaf0;
+            --muted: #6b7280;
+            --purple: #a78bfa;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, 'PingFang TC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px 16px 40px;
+        }
+        h1 { font-size: 18px; font-weight: 700; margin-bottom: 3px; }
+        .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+        .badge {
+            display: inline-block;
+            background: rgba(167,139,250,0.15);
+            color: var(--purple);
+            border: 1px solid rgba(167,139,250,0.3);
+            border-radius: 20px;
+            font-size: 11px;
+            padding: 2px 8px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+        .card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        /* Drop zone */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 24px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent);
+            background: rgba(79,142,247,0.04);
+        }
+        .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+        .drop-zone .di { font-size: 28px; margin-bottom: 6px; }
+        .drop-zone .dl { font-size: 13px; color: var(--muted); }
+        .drop-zone .dl span { color: var(--accent); }
+
+        /* Note box */
+        .note {
+            background: rgba(167,139,250,0.08);
+            border: 1px solid rgba(167,139,250,0.2);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: #c4b5fd;
+            line-height: 1.6;
+            margin-top: 10px;
+        }
+        .note strong { color: var(--purple); }
+
+        /* Page grid */
+        .sel-row {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 10px; flex-wrap: wrap;
+        }
+        .sel-info { font-size: 12px; color: var(--muted); flex: 1; }
+        .sel-info span { color: var(--accent); font-weight: 700; }
+        .mini-btn {
+            background: none; border: 1px solid var(--border);
+            color: var(--muted); border-radius: 6px;
+            padding: 3px 9px; cursor: pointer; font-size: 11px;
+            transition: 0.15s;
+        }
+        .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        .page-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 6px;
+            max-height: 260px;
+            overflow-y: auto;
+        }
+        .page-thumb {
+            border: 2px solid var(--border);
+            border-radius: 7px;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.15s;
+            background: #13151f;
+        }
+        .page-thumb.selected { border-color: var(--accent); }
+        .page-thumb canvas { display: block; width: 100%; }
+        .page-thumb .pg-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.7);
+            font-size: 10px; text-align: center; padding: 2px 0; color: #fff;
+        }
+        .page-thumb .ck {
+            position: absolute; top: 3px; right: 3px;
+            width: 16px; height: 16px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 10px;
+        }
+        .page-thumb.selected .ck { display: flex; }
+
+        /* Scan button */
+        .scan-btn {
+            width: 100%; padding: 11px;
+            background: linear-gradient(135deg, #6366f1, #4f8ef7);
+            border: none; border-radius: 10px;
+            color: #fff; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: 0.2s;
+            margin-top: 12px;
+        }
+        .scan-btn:hover { opacity: 0.9; }
+        .scan-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+        /* Progress */
+        .progress-wrap { margin-top: 10px; }
+        .progress-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #4f8ef7); width: 0%; transition: width 0.4s; }
+        .progress-label { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+        /* Results */
+        .result-header {
+            display: flex; align-items: center;
+            justify-content: space-between; margin-bottom: 10px;
+        }
+        .result-count { font-size: 13px; color: var(--muted); }
+        .result-count span { color: var(--green); font-weight: 700; }
+        .export-btn {
+            background: var(--green); border: none; border-radius: 7px;
+            color: #0f1117; font-size: 11px; font-weight: 700;
+            padding: 5px 12px; cursor: pointer; transition: 0.2s;
+        }
+        .export-btn:hover { background: #35b87d; }
+        .export-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+        .result-table-wrap {
+            max-height: 400px; overflow-y: auto;
+            border: 1px solid var(--border); border-radius: 8px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th {
+            background: #13151f; padding: 7px 10px;
+            text-align: left; font-size: 10px; font-weight: 600;
+            color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+            position: sticky; top: 0; z-index: 1;
+        }
+        td { padding: 7px 10px; border-top: 1px solid var(--border); }
+        tr:hover td { background: rgba(255,255,255,0.02); }
+        .code-cell { font-family: monospace; color: var(--yellow); white-space: nowrap; }
+        .price-cell { color: var(--green); white-space: nowrap; }
+        .page-cell { color: var(--muted); font-size: 10px; }
+        .promo-cell { color: #a0aec0; font-size: 11px; }
+
+        .empty-state { text-align: center; padding: 32px 16px; color: var(--muted); font-size: 12px; }
+        .empty-state .ei { font-size: 32px; margin-bottom: 8px; }
+
+        /* Log */
+        details { margin-top: 10px; }
+        summary { font-size: 11px; color: var(--muted); cursor: pointer; }
+        .log-box {
+            background: #0a0b10; border-radius: 8px; padding: 10px;
+            font-family: monospace; font-size: 10px; color: #5cdb95;
+            max-height: 180px; overflow-y: auto; margin-top: 6px;
+            white-space: pre-wrap; line-height: 1.7;
+        }
+
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+<h1>📦 PDF 商品提取 <span class="badge">Claude Vision</span></h1>
+<p class="subtitle">圖片型PDF專用 · AI精準辨識品號品名</p>
+
+<!-- Step 1: Upload -->
+<div class="card">
+    <div class="card-title">① 上傳 PDF</div>
+    <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="application/pdf">
+        <div class="di">📄</div>
+        <div class="dl">點擊或拖曳 <span>PDF 檔案</span></div>
+    </div>
+    <div class="note">
+        <strong>⚠️ 注意：</strong>此 PDF 每頁都是圖片（非向量文字），
+        使用 <strong>Claude Vision API</strong> 辨識，準確率遠高於 Tesseract OCR。
+        每頁約耗時 3-8 秒。
+    </div>
+</div>
+
+<!-- Step 2: Page select -->
+<div class="card" id="page-section" style="display:none">
+    <div class="card-title">② 選擇要掃描的頁面</div>
+    <div class="sel-row">
+        <span class="sel-info">已選 <span id="sel-count">0</span> 頁</span>
+        <button class="mini-btn" id="btn-all">全選</button>
+        <button class="mini-btn" id="btn-none">清除</button>
+    </div>
+    <div class="page-grid" id="page-grid"></div>
+    <button class="scan-btn" id="btn-scan" disabled>🤖 開始 AI 掃描</button>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-label" id="progress-label">準備中...</div>
+    </div>
+</div>
+
+<!-- Step 3: Results -->
+<div class="card" id="result-section" style="display:none">
+    <div class="result-header">
+        <div class="result-count">找到 <span id="result-count">0</span> 筆商品</div>
+        <button class="export-btn" id="btn-export" disabled>⬇ CSV</button>
+    </div>
+    <div class="result-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>品號</th>
+                    <th>品名</th>
+                    <th>原價</th>
+                    <th>活動</th>
+                    <th>頁</th>
+                </tr>
+            </thead>
+            <tbody id="result-body">
+                <tr><td colspan="5"><div class="empty-state"><div class="ei">🔍</div>尚無資料</div></td></tr>
+            </tbody>
+        </table>
+    </div>
+    <details>
+        <summary>除錯日誌</summary>
+        <div class="log-box" id="log-box"></div>
+    </details>
+</div>
+
+<script>
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+let currentPdf = null;
+let allResults = [];
+
+const $ = id => document.getElementById(id);
+
+function log(msg) {
+    const lb = $('log-box');
+    lb.textContent += msg + '\n';
+    lb.scrollTop = lb.scrollHeight;
+}
+
+// ─── File upload ────────────────────────────────────────────────
+$('drop-zone').addEventListener('dragover', e => { e.preventDefault(); $('drop-zone').classList.add('drag-over'); });
+$('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('drag-over'));
+$('drop-zone').addEventListener('drop', e => {
+    e.preventDefault();
+    $('drop-zone').classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f?.type === 'application/pdf') loadPdf(f);
+});
+$('file-input').addEventListener('change', e => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
+
+async function loadPdf(file) {
+    $('log-box').textContent = '';
+    $('page-grid').innerHTML = '';
+    log(`載入: ${file.name}`);
+    const ab = await file.arrayBuffer();
+    currentPdf = await pdfjsLib.getDocument(ab).promise;
+    log(`總頁數: ${currentPdf.numPages}`);
+
+    for (let i = 1; i <= currentPdf.numPages; i++) {
+        const page = await currentPdf.getPage(i);
+        const vp = page.getViewport({ scale: 0.22 });
+        const canvas = document.createElement('canvas');
+        canvas.width = vp.width; canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+
+        const div = document.createElement('div');
+        div.className = 'page-thumb';
+        div.dataset.page = i;
+        div.innerHTML = `<div class="ck">✓</div><div class="pg-label">P.${i}</div>`;
+        div.prepend(canvas);
+        div.onclick = () => { div.classList.toggle('selected'); updateSel(); };
+        $('page-grid').appendChild(div);
+    }
+
+    $('page-section').style.display = 'block';
+    $('result-section').style.display = 'block';
+    updateSel();
+}
+
+function updateSel() {
+    const n = document.querySelectorAll('.page-thumb.selected').length;
+    $('sel-count').textContent = n;
+    $('btn-scan').disabled = n === 0;
+}
+$('btn-all').onclick = () => { document.querySelectorAll('.page-thumb').forEach(d => d.classList.add('selected')); updateSel(); };
+$('btn-none').onclick = () => { document.querySelectorAll('.page-thumb').forEach(d => d.classList.remove('selected')); updateSel(); };
+
+// ─── Render page to base64 ──────────────────────────────────────
+async function pageToBase64(pageNum, scale = 2.5) {
+    const page = await currentPdf.getPage(pageNum);
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width; canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    // 取 base64，去掉 data:image/png;base64, 前綴
+    return canvas.toDataURL('image/png').split(',')[1];
+}
+
+// ─── Call Claude Vision API ─────────────────────────────────────
+async function scanPageWithClaude(pageNum) {
+    log(`  渲染第 ${pageNum} 頁 (scale=2.5)...`);
+    const b64 = await pageToBase64(pageNum, 2.5);
+    log(`  圖片大小: ~${Math.round(b64.length * 0.75 / 1024)}KB，送出 API...`);
+
+    const prompt = `這是一張7-ELEVEN指定商品清單的圖片。
+請找出所有有「6位數品號」的商品列，提取以下欄位：
+- 品號（6位數字）
+- 品名（完整商品名稱）
+- 原價（數字，若無則空白）
+- 活動方式（如「買1送1」、「買2送2」、「任選第2件10元」等，若無則空白）
+
+請嚴格以 JSON 格式回傳，範例：
+{"items":[{"code":"439352","name":"UCC無糖咖啡CAN185g","price":"35","promo":"買2送2"}]}
+
+只回傳 JSON，不要任何其他文字。`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1000,
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
+                    { type: "text", text: prompt }
+                ]
+            }]
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        log(`  ❌ API錯誤: ${data.error.message}`);
+        return [];
+    }
+
+    const raw = data.content?.find(b => b.type === 'text')?.text || '';
+    log(`  API回應: ${raw.substring(0, 120)}...`);
+
+    // 解析 JSON，允許被 markdown code block 包裹
+    try {
+        const clean = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const parsed = JSON.parse(clean);
+        const items = (parsed.items || []).map(item => ({ ...item, page: pageNum }));
+        log(`  ✅ 找到 ${items.length} 筆商品`);
+        items.forEach(it => log(`     ${it.code}  ${it.name}  ${it.price || ''}  ${it.promo || ''}`));
+        return items;
+    } catch (e) {
+        log(`  ⚠️ JSON 解析失敗: ${e.message}\n  原始: ${raw}`);
+        return [];
+    }
+}
+
+// ─── Main scan ──────────────────────────────────────────────────
+$('btn-scan').addEventListener('click', async () => {
+    const pages = Array.from(document.querySelectorAll('.page-thumb.selected'))
+        .map(d => parseInt(d.dataset.page));
+    if (!pages.length) return;
+
+    $('btn-scan').disabled = true;
+    $('progress-wrap').style.display = 'block';
+    allResults = [];
+    $('log-box').textContent = '';
+
+    for (let i = 0; i < pages.length; i++) {
+        const num = pages[i];
+        const pct = Math.round((i / pages.length) * 100);
+        $('progress-fill').style.width = pct + '%';
+        $('progress-label').textContent = `第 ${num} 頁 (${i+1}/${pages.length})...`;
+        log(`\n── 掃描第 ${num} 頁 ──`);
+
+        const items = await scanPageWithClaude(num);
+        allResults.push(...items);
+
+        // 即時更新表格
+        renderResults();
+    }
+
+    $('progress-fill').style.width = '100%';
+    $('progress-label').textContent = `✅ 完成！共 ${allResults.length} 筆`;
+    $('btn-scan').disabled = false;
+});
+
+// ─── Render results ─────────────────────────────────────────────
+function renderResults() {
+    $('result-count').textContent = allResults.length;
+    $('btn-export').disabled = allResults.length === 0;
+
+    if (!allResults.length) {
+        $('result-body').innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="ei">😅</div>尚無資料</div></td></tr>';
+        return;
+    }
+
+    $('result-body').innerHTML = allResults.map(r => `
+        <tr>
+            <td class="code-cell">${r.code}</td>
+            <td>${esc(r.name)}</td>
+            <td class="price-cell">${r.price || '—'}</td>
+            <td class="promo-cell">${esc(r.promo || '—')}</td>
+            <td class="page-cell">P.${r.page}</td>
+        </tr>
+    `).join('');
+}
+
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── CSV Export ─────────────────────────────────────────────────
+$('btn-export').addEventListener('click', () => {
+    const bom = '\uFEFF';
+    const header = '品號,品名,原價,活動方式,頁碼\n';
+    const rows = allResults.map(r =>
+        `${r.code},"${String(r.name).replace(/"/g,'""')}",${r.price || ''},` +
+        `"${String(r.promo||'').replace(/"/g,'""')}",${r.page}`
+    ).join('\n');
+    const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'products.csv'; a.click();
+    URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
