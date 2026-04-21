@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>商品表格辨識</title>
+<style>
+:root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3e;
+    --accent: #4f8ef7; --green: #3ecf8e; --yellow: #f7c948;
+    --text: #e8eaf0; --muted: #6b7280; --red: #f74f6a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'PingFang TC', sans-serif; background: var(--bg); color: var(--text); padding: 18px 14px 40px; }
+
+h1 { font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+.sub { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+
+/* API key */
+input[type=password], input[type=text] {
+    width: 100%; padding: 9px 11px; border-radius: 8px;
+    border: 1px solid var(--border); background: #13151f;
+    color: var(--text); font-size: 13px; font-family: monospace; outline: none;
+}
+input:focus { border-color: var(--accent); }
+.note { background: rgba(79,142,247,.08); border: 1px solid rgba(79,142,247,.2); border-radius: 7px; padding: 8px 11px; font-size: 11px; color: #93c5fd; line-height: 1.6; margin-top: 8px; }
+
+/* Drop zone */
+.drop-zone {
+    border: 2px dashed var(--border); border-radius: 10px;
+    padding: 22px 14px; text-align: center; cursor: pointer;
+    transition: .2s; position: relative;
+}
+.drop-zone:hover, .drop-zone.over { border-color: var(--accent); background: rgba(79,142,247,.04); }
+.drop-zone input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.drop-zone .di { font-size: 26px; margin-bottom: 5px; }
+.drop-zone .dl { font-size: 13px; color: var(--muted); }
+.drop-zone .dl span { color: var(--accent); }
+
+/* Image preview list */
+.img-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.img-row {
+    display: flex; align-items: center; gap: 10px;
+    background: #13151f; border-radius: 8px; padding: 8px 10px;
+    border: 1px solid var(--border);
+}
+.img-row img { width: 52px; height: 52px; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
+.img-info { flex: 1; min-width: 0; }
+.img-name { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.img-status { font-size: 11px; margin-top: 3px; }
+.status-wait { color: var(--muted); }
+.status-scan { color: var(--accent); }
+.status-ok   { color: var(--green); }
+.status-err  { color: var(--red); }
+.img-del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 2px 4px; }
+.img-del:hover { color: var(--red); }
+
+/* Scan btn */
+.scan-btn {
+    width: 100%; padding: 11px; border: none; border-radius: 10px;
+    background: linear-gradient(135deg,#6366f1,#4f8ef7);
+    color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: .2s; margin-top: 10px;
+}
+.scan-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+/* Progress */
+.prog-wrap { margin-top: 8px; display: none; }
+.prog-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; background: linear-gradient(90deg,#6366f1,#4f8ef7); width: 0%; transition: width .4s; }
+.prog-label { font-size: 11px; color: var(--muted); margin-top: 5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin-right: 5px; vertical-align: middle; }
+
+/* Results */
+.result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.result-count { font-size: 13px; color: var(--muted); }
+.result-count span { color: var(--green); font-weight: 700; }
+.export-btn { background: var(--green); border: none; border-radius: 7px; color: #0f1117; font-size: 11px; font-weight: 700; padding: 5px 12px; cursor: pointer; }
+.export-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+.tbl-wrap { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { background: #13151f; padding: 7px 10px; text-align: left; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; position: sticky; top: 0; }
+td { padding: 7px 10px; border-top: 1px solid var(--border); }
+tr:hover td { background: rgba(255,255,255,.02); }
+.tc { font-family: monospace; color: var(--yellow); }
+.tp { color: var(--green); }
+.tpg { color: #a0aec0; font-size: 11px; }
+.tsrc { color: var(--muted); font-size: 10px; }
+
+.empty { text-align: center; padding: 30px; color: var(--muted); font-size: 12px; }
+.empty .ei { font-size: 30px; margin-bottom: 8px; }
+
+details { margin-top: 10px; }
+summary { font-size: 11px; color: var(--muted); cursor: pointer; }
+.log { background: #0a0b10; border-radius: 7px; padding: 10px; font-family: monospace; font-size: 10px; color: #5cdb95; max-height: 160px; overflow-y: auto; margin-top: 6px; white-space: pre-wrap; line-height: 1.7; }
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<h1>📋 商品表格辨識</h1>
+<p class="sub">截圖批量上傳 · Gemini Vision 免費辨識</p>
+
+<!-- API Key -->
+<div class="card">
+    <div class="label">① Gemini API Key</div>
+    <input type="password" id="api-key" placeholder="AIzaSy...">
+    <div class="note">
+        免費取得：<strong>aistudio.google.com</strong> → Get API Key → Create API Key
+    </div>
+</div>
+
+<!-- Upload -->
+<div class="card">
+    <div class="label">② 上傳截圖（可多選）</div>
+    <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="image/*" multiple>
+        <div class="di">🖼️</div>
+        <div class="dl">點擊或拖曳<span>圖片</span>，可一次多選</div>
+    </div>
+    <div class="img-list" id="img-list"></div>
+    <button class="scan-btn" id="btn-scan" disabled>🤖 開始辨識</button>
+    <div class="prog-wrap" id="prog-wrap">
+        <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
+        <div class="prog-label" id="prog-label"></div>
+    </div>
+</div>
+
+<!-- Results -->
+<div class="card" id="result-card" style="display:none">
+    <div class="result-header">
+        <div class="result-count">找到 <span id="res-count">0</span> 筆</div>
+        <button class="export-btn" id="btn-export" disabled>⬇ CSV</button>
+    </div>
+    <div class="tbl-wrap">
+        <table>
+            <thead><tr><th>品號</th><th>品名</th><th>原價</th><th>活動</th><th>來源</th></tr></thead>
+            <tbody id="res-body">
+                <tr><td colspan="5"><div class="empty"><div class="ei">🔍</div>尚無資料</div></td></tr>
+            </tbody>
+        </table>
+    </div>
+    <details>
+        <summary>除錯日誌</summary>
+        <div class="log" id="log"></div>
+    </details>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let files = [];      // { file, name, objectUrl, status }
+let allResults = [];
+
+function log(msg) {
+    const el = $('log');
+    el.textContent += msg + '\n';
+    el.scrollTop = el.scrollHeight;
+}
+
+// ── File input ──────────────────────────────────────────────────
+$('drop-zone').addEventListener('dragover', e => { e.preventDefault(); $('drop-zone').classList.add('over'); });
+$('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('over'));
+$('drop-zone').addEventListener('drop', e => {
+    e.preventDefault(); $('drop-zone').classList.remove('over');
+    addFiles([...e.dataTransfer.files]);
+});
+$('file-input').addEventListener('change', e => {
+    addFiles([...e.target.files]);
+    e.target.value = '';
+});
+
+function addFiles(newFiles) {
+    newFiles.filter(f => f.type.startsWith('image/')).forEach(f => {
+        files.push({ file: f, name: f.name, objectUrl: URL.createObjectURL(f), status: 'wait' });
+    });
+    renderImgList();
+    updateScanBtn();
+}
+
+function removeFile(idx) {
+    URL.revokeObjectURL(files[idx].objectUrl);
+    files.splice(idx, 1);
+    renderImgList();
+    updateScanBtn();
+}
+
+function renderImgList() {
+    const list = $('img-list');
+    if (!files.length) { list.innerHTML = ''; return; }
+    list.innerHTML = files.map((f, i) => `
+        <div class="img-row" id="row-${i}">
+            <img src="${f.objectUrl}" alt="">
+            <div class="img-info">
+                <div class="img-name">${esc(f.name)}</div>
+                <div class="img-status status-${f.status}" id="status-${i}">${statusText(f.status)}</div>
+            </div>
+            <button class="img-del" onclick="removeFile(${i})">✕</button>
+        </div>
+    `).join('');
+}
+
+function statusText(s) {
+    return { wait: '待掃描', scan: '⏳ 辨識中...', ok: '✅ 完成', err: '❌ 失敗' }[s] || s;
+}
+
+function updateScanBtn() {
+    $('btn-scan').disabled = files.length === 0;
+}
+
+function setFileStatus(i, status, extra = '') {
+    files[i].status = status;
+    const el = $(`status-${i}`);
+    if (el) {
+        el.className = `img-status status-${status}`;
+        el.textContent = statusText(status) + extra;
+    }
+}
+
+// ── Image to base64 ─────────────────────────────────────────────
+function fileToBase64(file) {
+    return new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = e => res(e.target.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+    });
+}
+
+// ── Gemini API call ─────────────────────────────────────────────
+async function scanImage(file, idx) {
+    const apiKey = $('api-key').value.trim();
+    const b64 = await fileToBase64(file.file);
+    const mime = file.file.type || 'image/jpeg';
+    const kb = Math.round(b64.length * 0.75 / 1024);
+    log(`\n── ${file.name} (~${kb}KB) ──`);
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const prompt = `這是一張商品清單表格截圖。
+請找出所有有「6位數品號」的商品列，提取：
+- code：品號（6位數字）
+- name：品名（完整名稱）
+- price：原價（純數字，無則空字串）
+- promo：活動方式（如「買1送1」，無則空字串）
+
+只回傳 JSON，格式：{"items":[{"code":"439352","name":"UCC無糖咖啡CAN185g","price":"35","promo":"買2送2"}]}`;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+
+    let resp;
+    try {
+        resp = await fetch(url, {
+            method: 'POST', signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [
+                    { inline_data: { mime_type: mime, data: b64 } },
+                    { text: prompt }
+                ]}],
+                generationConfig: { temperature: 0, maxOutputTokens: 2048 }
+            })
+        });
+    } catch (err) {
+        clearTimeout(timer);
+        log(`  ❌ ${err.name === 'AbortError' ? '逾時' : err.message}`);
+        return [];
+    }
+    clearTimeout(timer);
+
+    let data;
+    try { data = await resp.json(); }
+    catch (e) { log(`  ❌ 解析失敗 HTTP ${resp.status}`); return []; }
+
+    if (data.error) { log(`  ❌ API錯誤: ${data.error.message}`); return []; }
+
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    log(`  回應: ${raw.substring(0, 200)}`);
+
+    try {
+        const clean = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const parsed = JSON.parse(clean);
+        const items = (parsed.items || []).map(it => ({ ...it, src: file.name }));
+        log(`  ✅ ${items.length} 筆`);
+        return items;
+    } catch (e) {
+        log(`  ⚠️ JSON解析失敗: ${raw}`);
+        return [];
+    }
+}
+
+// ── Main scan ───────────────────────────────────────────────────
+$('btn-scan').addEventListener('click', async () => {
+    const apiKey = $('api-key').value.trim();
+    if (!apiKey.startsWith('AIza') || apiKey.length < 20) {
+        alert('請輸入有效的 Gemini API Key（AIzaSy... 開頭）');
+        return;
+    }
+    if (!files.length) return;
+
+    $('btn-scan').disabled = true;
+    $('prog-wrap').style.display = 'block';
+    $('result-card').style.display = 'block';
+    $('log').textContent = '';
+    allResults = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const pct = Math.round(i / files.length * 100);
+        $('prog-fill').style.width = pct + '%';
+        $('prog-label').innerHTML = `<span class="spinner"></span>${files[i].name} (${i+1}/${files.length})`;
+        setFileStatus(i, 'scan');
+
+        const items = await scanImage(files[i], i);
+        if (items.length > 0) {
+            setFileStatus(i, 'ok', `，找到 ${items.length} 筆`);
+            allResults.push(...items);
+        } else {
+            setFileStatus(i, 'err');
+        }
+        renderResults();
+    }
+
+    $('prog-fill').style.width = '100%';
+    $('prog-label').textContent = `✅ 完成！共 ${allResults.length} 筆`;
+    $('btn-scan').disabled = false;
+});
+
+// ── Render results ──────────────────────────────────────────────
+function renderResults() {
+    $('res-count').textContent = allResults.length;
+    $('btn-export').disabled = allResults.length === 0;
+    if (!allResults.length) {
+        $('res-body').innerHTML = '<tr><td colspan="5"><div class="empty"><div class="ei">😅</div>尚無資料</div></td></tr>';
+        return;
+    }
+    $('res-body').innerHTML = allResults.map(r => `
+        <tr>
+            <td class="tc">${r.code}</td>
+            <td>${esc(r.name)}</td>
+            <td class="tp">${r.price || '—'}</td>
+            <td class="tpg">${esc(r.promo || '—')}</td>
+            <td class="tsrc">${esc(r.src)}</td>
+        </tr>
+    `).join('');
+}
+
+// ── CSV Export ──────────────────────────────────────────────────
+$('btn-export').addEventListener('click', () => {
+    const bom = '\uFEFF';
+    const header = '品號,品名,原價,活動方式,來源\n';
+    const rows = allResults.map(r =>
+        `${r.code},"${String(r.name).replace(/"/g,'""')}",${r.price || ''},"${String(r.promo||'').replace(/"/g,'""')}","${r.src}"`
+    ).join('\n');
+    const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'products.csv';
+    a.click();
+});
+
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
